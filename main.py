@@ -200,6 +200,7 @@ class SklandPlugin(Star):
     async def skdlogin(self, event: AstrMessageEvent, token: str = ""):
         # 验证是否在群内登录 如果是 则提示用户撤回消息且在私聊中使用
         group_id = getattr(event.message_obj, "group_id", None)
+        user_name = event.get_sender_name()
         if group_id:
             yield event.plain_result(" 请在私聊中使用此命令登录\n为保护隐私，请将发送在群内的登录消息撤回")
             return
@@ -222,6 +223,7 @@ class SklandPlugin(Star):
             user_data = {
                 "token": token,
                 "nickname": nickname,
+                "last_username": user_name,
                 "last_sign": {},
                 "bound_at": datetime.now().isoformat(),
                 "platform_name": event.get_platform_name(),
@@ -283,11 +285,17 @@ class SklandPlugin(Star):
                     continue
                 try:
                     results, nickname = await self.api.do_full_sign_in(user_data["token"])
-
-                    # 如果配置不显示玩家名称，或者昵称获取为空，则使用QQ昵称
+                    logger.info(self.get_kv_data("users", {}))
+                    # 滚动更新昵称，每次将发送者昵称更新到用户数据中，确保昵称是最新的
+                    if user_id in str(users_data.get("umo")):
+                        # 当用户名不一致则更新
+                        if user_name != user_data.get("last_username"):
+                            await self.put_kv_data("users", {**(await self.get_kv_data("users", {})), user_id: {"last_username": nickname}})
+                    
+                    # 如果配置不显示玩家名称，或者昵称获取为空，则使用QQ昵称显示
                     if nickname == None or nickname.strip() == "" or not self.config.get("show_player_name", True):
-                        nickname = user_name
-                            
+                        nickname = user_data.get("last_username").strip() or "(未知)"
+                    
                     user_data["nickname"] = nickname
                     for r in results:
                         if r.game == "明日方舟" and self._is_signed_today(r):
