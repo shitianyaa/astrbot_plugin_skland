@@ -54,12 +54,20 @@ class SklandPlugin(Star):
             value=1,
             description="自动签到执行的小时（0-23），默认凌晨1点"
         )
+        put_config(
+            namespace=PLUGIN_NAME,
+            name="显示玩家名称",
+            key="show_player_name",
+            value=True,
+            description="开启后，将在签到结果中显示森空岛昵称，否则显示QQ昵称"
+        )
 
     def _get_config(self) -> dict:
         """获取当前配置"""
         return {
             "auto_sign_enabled": self.config.get("auto_sign_enabled", True),
             "auto_sign_hour": self.config.get("auto_sign_hour", 1),
+            "show_player_name": self.config.get("show_player_name", True),
         }
 
     async def initialize(self):
@@ -180,22 +188,32 @@ class SklandPlugin(Star):
     @filter.command("skdhelp")
     async def skdhelp(self, event: AstrMessageEvent):
         """森空岛签到插件帮助"""
-        yield event.plain_result("森空岛签到插件帮助\n"
-                                 "1. 私聊机器人发送/skdlogin <token> 登录并签到\n"
-                                 "2. 私聊机器人发送/skdlogout 登出\n"
-                                 "3. /skd 查看签到状态"
-                          )
-        
-    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+        yield event.plain_result(
+            "森空岛签到插件帮助\n"
+            "1. 私聊机器人发送/skdlogin <token> 登录并签到\n"
+            "2. 私聊机器人发送/skdlogout 登出\n"
+            "3. /skd 查看签到状态"
+        )
+    
+    # @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @filter.command("skdlogin")
     async def skdlogin(self, event: AstrMessageEvent, token: str = ""):
+        # 验证是否在群内登录 如果是 则提示用户撤回消息且在私聊中使用
+        group_id = getattr(event.message_obj, "group_id", None)
+        user_name = event.get_sender_name()
+        if group_id:
+            yield event.plain_result(" 请在私聊中使用此命令登录\n为保护隐私，请将发送在群内的登录消息撤回")
+            return
+        
         user_id = event.get_sender_id()
         token = token.strip()
         if not token:
             yield event.plain_result(
                 "请先获取token，方法如下:\n"
-                "1. 登录 鹰角网络通行证 后，打开 (https://web-api.hypergryph.com/account/info/hg) 记下 content 字段的值（推荐）。"
-                "   或者登录 森空岛网页版 (https://www.skland.com/) 后，打开 (https://web-api.skland.com/account/info/hg) 记下 content 字段的值。\n"
+                "1. 登录 鹰角网络通行证 后，打开 (https://web-api.hypergryph.com/account/info/hg) 记下 content 字段的值（推荐）。\n"
+                "   或者登录 森空岛网页版 (https://www.skland.com/) 后，\n"
+                "   打开 (https://web-api.skland.com/account/info/hg) 记下 content 字段的值。\n"
+                "   请复制类似这样的段落，content字段示例：N6QKb2C3d4E5/A1b2C3d4\n"
                 "2. 使用方法:\n"
                 "   /skdlogin <content>")
             return
@@ -205,6 +223,7 @@ class SklandPlugin(Star):
             user_data = {
                 "token": token,
                 "nickname": nickname,
+                "last_username": user_name,
                 "last_sign": {},
                 "bound_at": datetime.now().isoformat(),
                 "platform_name": event.get_platform_name(),
@@ -221,9 +240,15 @@ class SklandPlugin(Star):
             logger.error(f"skdlogin失败: {e}")
             yield event.plain_result(f"登录失败: {str(e)}")
 
-    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    # @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @filter.command("skdlogout")
     async def skdlogout(self, event: AstrMessageEvent):
+        # 验证是否在群内登出 如果是 则提示用户撤回消息且在私聊中使用
+        group_id = getattr(event.message_obj, "group_id", None)
+        if group_id:
+            yield event.plain_result(" 请在私聊中使用此命令登出\n为保护隐私，请将发送在群内的登出消息撤回")
+            return
+        
         user_id = event.get_sender_id()
         users = await self.get_kv_data("users", {})
         if user_id in users:
@@ -237,12 +262,12 @@ class SklandPlugin(Star):
     async def skd(self, event: AstrMessageEvent):
         """群聊显示群成员签到状态，私聊显示自己"""
         user_id = event.get_sender_id()
+        user_name = event.get_sender_name()
         group_id = getattr(event.message_obj, "group_id", None)
         is_group = bool(group_id)
         users_data = await self.get_kv_data("users", {})
 
-        if is_group:
-            # 群聊模式
+        if is_group: # 群聊模式
             # 如果发送者已绑定，自动添加到该群
             if user_id in users_data:
                 groups = await self.get_kv_data("groups", {})
@@ -252,7 +277,7 @@ class SklandPlugin(Star):
                     groups[group_id].append(user_id)
                     await self.put_kv_data("groups", groups)
             
-            message_lines = ["📊 森空岛签到统计", "═══════════════", "方舟 | 终末 | 昵称", "-----------------"]
+            message_lines = [" 森空岛签到统计", "═══════════════", "方舟 | 终末 | 昵称", "-----------------"]
             group_users = (await self.get_kv_data("groups", {})).get(group_id, [])
             for uid in group_users:
                 user_data = users_data.get(uid)
@@ -260,13 +285,26 @@ class SklandPlugin(Star):
                     continue
                 try:
                     results, nickname = await self.api.do_full_sign_in(user_data["token"])
+                    logger.info(self.get_kv_data("users", {}))
+                    # 滚动更新昵称，每次将发送者昵称更新到用户数据中，确保昵称是最新的
+                    if user_id in str(users_data.get("umo")):
+                        # 当用户名不一致则更新
+                        if user_name != user_data.get("last_username"):
+                            await self.put_kv_data("users", {**(await self.get_kv_data("users", {})), user_id: {"last_username": nickname}})
+                    
+                    # 如果配置不显示玩家名称，或者昵称获取为空，则使用QQ昵称显示
+                    if nickname == None or nickname.strip() == "" or not self.config.get("show_player_name", True):
+                        nickname = user_data.get("last_username").strip() or "(未知)"
+                    
                     user_data["nickname"] = nickname
                     for r in results:
                         if r.game == "明日方舟" and self._is_signed_today(r):
                             user_data.setdefault("last_sign", {})["arknights"] = datetime.now().strftime("%Y-%m-%d")
                         elif r.game == "终末地" and self._is_signed_today(r):
                             user_data.setdefault("last_sign", {})["endfield"] = datetime.now().strftime("%Y-%m-%d")
+                    
                     users_data[uid] = user_data
+                    
                     ak_icon = "✅" if user_data.get("last_sign", {}).get("arknights") else "❌"
                     ef_icon = "✅" if user_data.get("last_sign", {}).get("endfield") else "❌"
                     message_lines.append(f" {ak_icon} | {ef_icon} | {nickname}")
@@ -274,8 +312,7 @@ class SklandPlugin(Star):
                     message_lines.append(" ⚠️ | ⚠️ | (Error)")
             await self.put_kv_data("users", users_data)
             yield event.plain_result("\n".join(message_lines))
-        else:
-            # 私聊模式
+        else: # 私聊模式
             user_data = users_data.get(user_id)
             if not user_data:
                 yield event.plain_result("你还未绑定账号，请使用 /skdlogin <token>")
