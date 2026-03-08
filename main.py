@@ -51,8 +51,8 @@ class SklandPlugin(Star):
             namespace=PLUGIN_NAME,
             name="自动签到时间（小时）",
             key="auto_sign_hour",
-            value=1,
-            description="自动签到执行的小时（0-23），默认凌晨1点"
+            value=9,
+            description="自动签到执行的小时（0-23），默认早上9点"
         )
         put_config(
             namespace=PLUGIN_NAME,
@@ -66,7 +66,7 @@ class SklandPlugin(Star):
         """获取当前配置"""
         return {
             "auto_sign_enabled": self.config.get("auto_sign_enabled", True),
-            "auto_sign_hour": self.config.get("auto_sign_hour", 1),
+            "auto_sign_hour": self.config.get("auto_sign_hour", 9),
             "show_player_name": self.config.get("show_player_name", True),
         }
 
@@ -89,7 +89,7 @@ class SklandPlugin(Star):
 
     # ==================== Auto Sign-In ====================
 
-    def _start_auto_sign_job(self, hour: int = 1):
+    def _start_auto_sign_job(self, hour: int = 9):
         """启动自动签到定时任务"""
         hour = max(0, min(23, hour))
         trigger = CronTrigger(hour=hour, minute=0)
