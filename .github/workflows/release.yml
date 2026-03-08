@@ -21,15 +21,17 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
+      - name: Fetch annotated tags
+        run: git fetch --tags --force
+
       - name: Get tag message
-        id: tag_message
         run: |
           TAG_NAME=${GITHUB_REF#refs/tags/}
-          TAG_MSG=$(git tag -l --format='%(contents)' "$TAG_NAME")
+          # Extract tag message from annotated tag
+          TAG_MSG=$(git for-each-ref --format='%(contents)' "refs/tags/$TAG_NAME")
           if [ -z "$TAG_MSG" ]; then
             TAG_MSG="Release $TAG_NAME"
           fi
-          # Write to file for multi-line support
           echo "$TAG_MSG" > RELEASE_NOTES.md
 
       - name: Create release package
