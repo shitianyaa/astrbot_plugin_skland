@@ -4,7 +4,7 @@ AstrBot Plugin - 森空岛签到 (Skland Sign-In)
 Commands:
 - skd (group): Show sign-in status for all bound users in the group
 - skd (private): Show user's own sign-in status
-- skdlogin (private): Login with token and immediately sign in
+- skdlogin: Login with QR code and immediately sign in
 - skdlogout (private): Logout and remove token
 - skdusers (all): Show users and stats 
 
@@ -19,7 +19,6 @@ Config (AstrBot plugin config):
 from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from astrbot.core.star.filter.permission import PermissionType
 import astrbot.api.message_components as Comp
 from astrbot.api import logger, AstrBotConfig
 from astrbot.api.event import AstrMessageEvent, filter, MessageChain
@@ -213,6 +212,26 @@ class SklandPlugin(Star):
                 lines.append(f"{r.game} 签到失败: {r.error}")
         return "\n".join(lines)
 
+    def _build_qr_png(self, content: str) -> bytes:
+        """Build a PNG QR code image in memory."""
+        from io import BytesIO
+
+        import qrcode
+
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=10,
+            border=2,
+        )
+        qr.add_data(content)
+        qr.make(fit=True)
+
+        image = qr.make_image(fill_color="black", back_color="white")
+        buffer = BytesIO()
+        image.save(buffer, format="PNG")
+        return buffer.getvalue()
+
     # ==================== Commands ====================
 
     @filter.command("skdhelp")
@@ -220,44 +239,40 @@ class SklandPlugin(Star):
         """森空岛签到插件帮助"""
         yield event.plain_result(
             "森空岛签到插件帮助\n"
-            "1. 私聊机器人发送/skdlogin <token> 登录并签到\n"
+            "1. 发送 /skdlogin 获取二维码，扫码确认后自动登录并签到\n"
             "2. 私聊机器人发送/skdlogout 登出\n"
             "3. /skd 查看签到状态"
         )
     
     # @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @filter.command("skdlogin")
-    async def skdlogin(self, event: AstrMessageEvent, token: str = ""):
-        # 验证是否在群内登录 如果是 则提示用户撤回消息且在私聊中使用
+    async def skdlogin(self, event: AstrMessageEvent, _legacy_token: str = ""):
+        """使用鹰角官方扫码登录并立即签到"""
         group_id = getattr(event.message_obj, "group_id", None)
         user_name = event.get_sender_name()
-        if group_id:
-            yield event.plain_result(" 请在私聊中使用此命令登录\n为保护隐私，请将发送在群内的登录消息撤回")
-            return
-        
         config = self._get_config()
-        
+
         user_id = event.get_sender_id()
         users = await self.get_kv_data("users", {})
         max_users = config.get("max_users", 10)
-        
+
         if user_id not in users and max_users > 0 and len(users) >= max_users:
             yield event.plain_result(f"❌ 绑定失败：已达到最大用户数限制（{max_users}个）\n请联系管理员调整配置")
             return
-        
-        token = token.strip()
-        if not token:
-            yield event.plain_result(
-                "请先获取token，方法如下:\n"
-                "1. 登录 鹰角网络通行证 后，打开 (https://web-api.hypergryph.com/account/info/hg) 记下 content 字段的值（推荐）。\n"
-                "   或者登录 森空岛网页版 (https://www.skland.com/) 后，\n"
-                "   打开 (https://web-api.skland.com/account/info/hg) 记下 content 字段的值。\n"
-                "   请复制类似这样的段落，content字段示例：N6QKb2C3d4A1b2C3d4，如果其中包含符号也一起复制\n"
-                "2. 使用方法:\n"
-                "   /skdlogin <content>")
-            return
-        yield event.plain_result("正在登录并签到，请稍候...")
+
         try:
+            session = await self.api.create_qr_login()
+            qr_png = self._build_qr_png(session.scan_url)
+            yield event.chain_result(
+                [
+                    Comp.Plain("请使用森空岛、明日方舟或终末地扫码确认登录。\n二维码约 2 分钟内有效，请本人扫码。"),
+                    Comp.Image.fromBytes(qr_png),
+                ]
+            )
+
+            token = await self.api.poll_qr_login_token(session.scan_id)
+            yield event.plain_result("扫码确认成功，正在绑定账号并执行签到...")
+
             results, nickname = await self.api.do_full_sign_in(token)
             user_data = {
                 "token": token,
@@ -265,6 +280,7 @@ class SklandPlugin(Star):
                 "last_username": user_name,
                 "last_sign": {},
                 "bound_at": datetime.now().isoformat(),
+                "login_method": "qr",
                 "platform_name": event.get_platform_name(),
                 "umo": event.unified_msg_origin,  # 保存统一会话ID
             }
@@ -273,8 +289,21 @@ class SklandPlugin(Star):
                     user_data["last_sign"]["arknights"] = datetime.now().strftime("%Y-%m-%d")
                 elif r.game == "终末地" and self._is_signed_today(r):
                     user_data["last_sign"]["endfield"] = datetime.now().strftime("%Y-%m-%d")
-            await self.put_kv_data("users", {**(await self.get_kv_data("users", {})), user_id: user_data})
+
+            users[user_id] = user_data
+            await self.put_kv_data("users", users)
+
+            if group_id:
+                groups = await self.get_kv_data("groups", {})
+                if group_id not in groups:
+                    groups[group_id] = []
+                if user_id not in groups[group_id]:
+                    groups[group_id].append(user_id)
+                    await self.put_kv_data("groups", groups)
+
             yield event.plain_result(f"登录成功！\n{self._format_sign_status(results, nickname)}")
+        except TimeoutError as e:
+            yield event.plain_result(str(e))
         except Exception as e:
             logger.error(f"skdlogin失败: {e}")
             yield event.plain_result(f"登录失败: {str(e)}")
@@ -411,7 +440,7 @@ class SklandPlugin(Star):
         else: # 私聊模式
             user_data = users_data.get(user_id)
             if not user_data:
-                yield event.plain_result("你还未绑定账号，请使用 /skdlogin <token>")
+                yield event.plain_result("你还未绑定账号，请使用 /skdlogin 扫码登录")
                 return
             try:
                 results, nickname = await self.api.do_full_sign_in(user_data["token"])

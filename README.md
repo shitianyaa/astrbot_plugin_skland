@@ -8,24 +8,18 @@
 
 - **skd** (群聊):        查看群内所有绑定用户的签到状态
 - **skd** (私聊):        查看自己的签到状态
-- **skdlogin** (私聊):   使用 token 登录并立即签到
+- **skdlogin** (全部):   生成二维码，扫码登录并立即签到
 - **skdlogout** (私聊):  登出并移除 token
 - **skdusers** (全部):   查询用户统计，普通用户仅显示签到人数和名额
 
 ## 使用
 
-### 获取 Token
-
-1. 登录 [森空岛](https://www.skland.com/)
-2. 访问 [森空岛/account/info/hg](https://web-api.skland.com/account/info/hg)
-3. 找到返回的 JSON 中的 `{"content":"XXX"}`
-4. 复制 `XXX` 部分
-
 ### 登录与签到
 
-1. 私聊发送 `/skdlogin XXX` 进行登录
-2. 登录成功后会自动执行一次签到
-3. 之后可以发送 `/skd` 查看签到状态
+1. 发送 `/skdlogin` 获取二维码
+2. 使用森空岛、明日方舟或终末地扫码确认登录
+3. 登录成功后会自动执行一次签到
+4. 之后可以发送 `/skd` 查看签到状态
 
 ## 安装
 
