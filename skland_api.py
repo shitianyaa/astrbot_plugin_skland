@@ -290,7 +290,12 @@ class SklandAPI:
             if status in (3, 4):
                 raise Exception(response.get("msg") or "二维码已失效或登录已取消")
 
-            await self._sleep(interval)
+            logger.warning(
+                "Unexpected QR login status: status=%s, msg=%s",
+                status,
+                response.get("msg"),
+            )
+            raise Exception(f"扫码登录状态异常: {status}")
 
         raise TimeoutError("二维码登录超时，请重新发送 /skdlogin")
 

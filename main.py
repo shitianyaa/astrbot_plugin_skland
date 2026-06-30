@@ -245,7 +245,7 @@ class SklandPlugin(Star):
         )
 
     @filter.command("skdlogin")
-    async def skdlogin(self, event: AstrMessageEvent, _legacy_token: str = ""):
+    async def skdlogin(self, event: AstrMessageEvent):
         """使用鹰角官方扫码登录并立即签到"""
         group_id = getattr(event.message_obj, "group_id", None)
         user_name = event.get_sender_name()
@@ -314,6 +314,19 @@ class SklandPlugin(Star):
         if user_id in users:
             del users[user_id]
             await self.put_kv_data("users", users)
+
+            groups = await self.get_kv_data("groups", {})
+            changed = False
+            for group_id, user_ids in list(groups.items()):
+                if user_id in user_ids:
+                    groups[group_id] = [uid for uid in user_ids if uid != user_id]
+                    changed = True
+                if not groups[group_id]:
+                    del groups[group_id]
+                    changed = True
+            if changed:
+                await self.put_kv_data("groups", groups)
+
             yield event.plain_result("已退出登录并清除绑定信息")
         else:
             yield event.plain_result("您尚未绑定森空岛账号")
