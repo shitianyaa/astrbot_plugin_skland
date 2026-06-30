@@ -5,7 +5,7 @@ Commands:
 - skd (group): Show sign-in status for all bound users in the group
 - skd (private): Show user's own sign-in status
 - skdlogin: Login with QR code and immediately sign in
-- skdlogout (private): Logout and remove token
+- skdlogout: Logout and remove binding
 - skdusers (all): Show users and stats 
 
 Config (AstrBot plugin config):
@@ -240,11 +240,10 @@ class SklandPlugin(Star):
         yield event.plain_result(
             "森空岛签到插件帮助\n"
             "1. 发送 /skdlogin 获取二维码，扫码确认后自动登录并签到\n"
-            "2. 私聊机器人发送/skdlogout 登出\n"
+            "2. 发送 /skdlogout 登出并移除绑定\n"
             "3. /skd 查看签到状态"
         )
     
-    # @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @filter.command("skdlogin")
     async def skdlogin(self, event: AstrMessageEvent, _legacy_token: str = ""):
         """使用鹰角官方扫码登录并立即签到"""
@@ -308,15 +307,8 @@ class SklandPlugin(Star):
             logger.error(f"skdlogin失败: {e}")
             yield event.plain_result(f"登录失败: {str(e)}")
 
-    # @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @filter.command("skdlogout")
     async def skdlogout(self, event: AstrMessageEvent):
-        # 验证是否在群内登出 如果是 则提示用户撤回消息且在私聊中使用
-        group_id = getattr(event.message_obj, "group_id", None)
-        if group_id:
-            yield event.plain_result(" 请在私聊中使用此命令登出\n为保护隐私，请将发送在群内的登出消息撤回")
-            return
-        
         user_id = event.get_sender_id()
         users = await self.get_kv_data("users", {})
         if user_id in users:
