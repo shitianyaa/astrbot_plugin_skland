@@ -461,7 +461,11 @@ class SklandAPI:
             msg = response.get("message") or response.get("msg") or "Unknown error"
             raise Exception(f"Authorization failed: {msg}")
 
-        return response["data"]["code"]
+        data = response.get("data")
+        code = data.get("code") if isinstance(data, dict) else None
+        if not isinstance(code, str) or not code:
+            raise Exception("Authorization failed: 响应缺少 code")
+        return code
 
     async def get_credential(self, authorization: str) -> Credential:
         """Get credential from authorization code"""
