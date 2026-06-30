@@ -6,7 +6,7 @@ Commands:
 - skd (private): Show user's own sign-in status
 - skdlogin: Login with QR code and immediately sign in
 - skdlogout: Logout and remove binding
-- skdusers (all): Show users and stats 
+- skdusers (all): Show users and stats
 
 Config (AstrBot plugin config):
 - auto_sign_enabled: 自动签到开关
@@ -138,7 +138,7 @@ class SklandPlugin(Star):
         if not users:
             logger.info("没有已注册的用户，跳过自动签到")
             return
-        
+
         # 自动签到的最大随机延时时间
         max_delay = config.get("auto_sign_delay", 10)
 
@@ -148,7 +148,7 @@ class SklandPlugin(Star):
                 delay = random.uniform(0, max_delay)
                 logger.info(f"处理下一个用户前等待 {delay:.2f} 秒")
                 await asyncio.sleep(delay)
-            
+
             if "token" not in user_data:
                 continue
 
@@ -243,7 +243,7 @@ class SklandPlugin(Star):
             "2. 发送 /skdlogout 登出并移除绑定\n"
             "3. /skd 查看签到状态"
         )
-    
+
     @filter.command("skdlogin")
     async def skdlogin(self, event: AstrMessageEvent, _legacy_token: str = ""):
         """使用鹰角官方扫码登录并立即签到"""
@@ -321,25 +321,25 @@ class SklandPlugin(Star):
     @filter.command("skdusers")
     async def skdusers(self, event: AstrMessageEvent):
         """查询当前注册用户数量"""
-        
+
         users = await self.get_kv_data("users", {})
         groups = await self.get_kv_data("groups", {})
         config = self._get_config()
         max_users = config.get("max_users", 10)
-        
+
         # 计算群聊分布
         group_stats = []
         for group_id, user_ids in groups.items():
             if user_ids:
                 group_name = group_id  # 这里可以尝试获取群名称，如果可能的话
                 group_stats.append(f"  • 群 {group_name}: {len(user_ids)} 人")
-        
+
         # 计算在线用户（最近7天有登录的用户）
         online_users = 0
         for user_data in users.values():
             if user_data.get("last_sign"):
                 online_users += 1
-        
+
         # 构建统计信息
         lines = [
             "📊 森空岛签到用户统计",
@@ -348,14 +348,14 @@ class SklandPlugin(Star):
             # f"📈 今日活跃: {online_users} 人",
             f"📉 未签到用户: {len(users) - online_users} 人",
         ]
-        
+
         # 检查管理员
         if event.is_admin():
             if max_users > 0:
                 remaining = max(0, max_users - len(users))
                 lines.append(f"🎯 最大限制: {max_users} 人")
                 lines.append(f"🆓 剩余名额: {remaining} 人")
-            
+
             # 限定私信查看
             if not getattr(event.message_obj, "group_id", None):
                 # 添加群聊分布
@@ -393,7 +393,7 @@ class SklandPlugin(Star):
                 if user_id not in groups[group_id]:
                     groups[group_id].append(user_id)
                     await self.put_kv_data("groups", groups)
-            
+
             message_lines = [" 森空岛签到统计", "═══════════════", "方舟 | 终末 | 昵称", "-----------------"]
             group_users = (await self.get_kv_data("groups", {})).get(group_id, [])
             for uid in group_users:
@@ -402,26 +402,26 @@ class SklandPlugin(Star):
                     continue
                 try:
                     results, nickname = await self.api.do_full_sign_in(user_data["token"])
-                    
+
                     # 滚动更新昵称，每次将发送者昵称更新到用户数据中，确保昵称是最新的
                     if user_id in str(users_data.get("umo")):
                         # 当用户名不一致则更新
                         if user_name != user_data.get("last_username"):
                             await self.put_kv_data("users", {**(await self.get_kv_data("users", {})), user_id: {"last_username": nickname}})
-                    
+
                     # 如果配置不显示玩家名称，或者昵称获取为空，则使用QQ昵称显示
                     if nickname == None or nickname.strip() == "" or not self.config.get("show_player_name", True):
                         nickname = user_data.get("last_username").strip() or "(未知)"
-                    
+
                     user_data["nickname"] = nickname
                     for r in results:
                         if r.game == "明日方舟" and self._is_signed_today(r):
                             user_data.setdefault("last_sign", {})["arknights"] = datetime.now().strftime("%Y-%m-%d")
                         elif r.game == "终末地" and self._is_signed_today(r):
                             user_data.setdefault("last_sign", {})["endfield"] = datetime.now().strftime("%Y-%m-%d")
-                    
+
                     users_data[uid] = user_data
-                    
+
                     ak_icon = "✅" if user_data.get("last_sign", {}).get("arknights") else "❌"
                     ef_icon = "✅" if user_data.get("last_sign", {}).get("endfield") else "❌"
                     message_lines.append(f" {ak_icon} | {ef_icon} | {nickname}")
