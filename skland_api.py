@@ -116,6 +116,15 @@ class Credential:
     cred: str
 
 
+@dataclass
+class QRLoginSession:
+    """QR login session data"""
+
+    scan_id: str
+    scan_url: str
+    apps: list[dict] = field(default_factory=list)
+
+
 class SklandAPI:
     """Skland API client"""
 
@@ -173,6 +182,122 @@ class SklandAPI:
         import asyncio
 
         await asyncio.sleep(seconds)
+
+    # ==================== QR Login ====================
+
+    def _get_qr_login_headers(self) -> dict:
+        """Get browser-like headers for Hypergryph QR login."""
+        return {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9",
+            "Origin": "https://user.hypergryph.com",
+            "Referer": "https://user.hypergryph.com/",
+        }
+
+    async def create_qr_login(self) -> QRLoginSession:
+        """Create a Hypergryph QR login session."""
+        response = await self._request(
+            "POST",
+            "https://as.hypergryph.com/general/v1/gen_scan/login",
+            headers=self._get_qr_login_headers(),
+            json_data={},
+        )
+
+        if response.get("status") != 0:
+            raise Exception(f"生成登录二维码失败: {response.get('msg', 'Unknown error')}")
+
+        data = response.get("data", {})
+        scan_id = data.get("scanId")
+        scan_url = data.get("scanUrl")
+        if not scan_id or not scan_url:
+            raise Exception(f"生成登录二维码失败: 响应缺少 scanId 或 scanUrl")
+
+        return QRLoginSession(
+            scan_id=scan_id,
+            scan_url=scan_url,
+            apps=data.get("enableScanAppList", []),
+        )
+
+    async def _get_token_by_scan_code(self, scan_code: str) -> str:
+        """Exchange scanCode for a short Hypergryph token."""
+        response = await self._request(
+            "POST",
+            "https://as.hypergryph.com/user/auth/v1/token_by_scan_code",
+            headers=self._get_qr_login_headers(),
+            json_data={"scanCode": scan_code},
+        )
+
+        if response.get("status") != 0:
+            raise Exception(f"扫码登录失败: {response.get('msg', 'Unknown error')}")
+
+        token = response.get("data", {}).get("token")
+        if not token:
+            raise Exception("扫码登录失败: 响应缺少 token")
+        return token
+
+    async def _get_long_token(self, short_token: str) -> str:
+        """Exchange the scan token for the browser account token."""
+        response = await self._request(
+            "POST",
+            "https://as.hypergryph.com/user/oauth2/v2/grant",
+            headers=self._get_qr_login_headers(),
+            json_data={
+                "token": short_token,
+                "appCode": "be36d44aa36bfb5b",
+                "type": 1,
+            },
+        )
+
+        if response.get("status") != 0:
+            raise Exception(f"获取账号凭证失败: {response.get('msg', 'Unknown error')}")
+
+        token = response.get("data", {}).get("token")
+        if not token:
+            raise Exception("获取账号凭证失败: 响应缺少 token")
+        return token
+
+    async def poll_qr_login_token(
+        self,
+        scan_id: str,
+        timeout: int = 120,
+        interval: float = 2.0,
+    ) -> str:
+        """Poll QR login status until the user confirms and return account token."""
+        deadline = time.monotonic() + timeout
+        headers = self._get_qr_login_headers()
+
+        while time.monotonic() < deadline:
+            response = await self._request(
+                "GET",
+                f"https://as.hypergryph.com/general/v1/scan_status?scanId={scan_id}",
+                headers=headers,
+            )
+            status = response.get("status")
+            data = response.get("data", {})
+
+            if status == 0:
+                scan_code = data.get("scanCode")
+                if not scan_code:
+                    raise Exception("扫码登录失败: 响应缺少 scanCode")
+                short_token = await self._get_token_by_scan_code(scan_code)
+                return await self._get_long_token(short_token)
+
+            if status in (100, 101):
+                await self._sleep(interval)
+                continue
+
+            if status in (3, 4):
+                raise Exception(response.get("msg") or "二维码已失效或登录已取消")
+
+            logger.warning(
+                "Unexpected QR login status: status=%s, msg=%s",
+                status,
+                response.get("msg"),
+            )
+            raise Exception(f"扫码登录状态异常: {status}")
+
+        raise TimeoutError("二维码登录超时，请重新发送 /skdlogin")
 
     # ==================== Device ID Generation ====================
 
