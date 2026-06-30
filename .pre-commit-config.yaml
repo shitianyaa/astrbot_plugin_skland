@@ -1,0 +1,26 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: local
+    hooks:
+      - id: python-compile
+        name: Python syntax check
+        entry: python -m py_compile main.py skland_api.py
+        language: system
+        pass_filenames: false
+        files: ^(main|skland_api)\.py$
+
+      - id: config-json
+        name: Config schema JSON check
+        entry: python -m json.tool _conf_schema.json
+        language: system
+        pass_filenames: false
+        files: ^_conf_schema\.json$
