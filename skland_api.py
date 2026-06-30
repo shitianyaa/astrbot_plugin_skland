@@ -236,27 +236,6 @@ class SklandAPI:
             raise Exception("扫码登录失败: 响应缺少 token")
         return token
 
-    async def _get_long_token(self, short_token: str) -> str:
-        """Exchange the scan token for the browser account token."""
-        response = await self._request(
-            "POST",
-            "https://as.hypergryph.com/user/oauth2/v2/grant",
-            headers=self._get_qr_login_headers(),
-            json_data={
-                "token": short_token,
-                "appCode": "be36d44aa36bfb5b",
-                "type": 1,
-            },
-        )
-
-        if response.get("status") != 0:
-            raise Exception(f"获取账号凭证失败: {response.get('msg', 'Unknown error')}")
-
-        token = response.get("data", {}).get("token")
-        if not token:
-            raise Exception("获取账号凭证失败: 响应缺少 token")
-        return token
-
     async def poll_qr_login_token(
         self,
         scan_id: str,
@@ -280,8 +259,7 @@ class SklandAPI:
                 scan_code = data.get("scanCode")
                 if not scan_code:
                     raise Exception("扫码登录失败: 响应缺少 scanCode")
-                short_token = await self._get_token_by_scan_code(scan_code)
-                return await self._get_long_token(short_token)
+                return await self._get_token_by_scan_code(scan_code)
 
             if status in (100, 101):
                 await self._sleep(interval)
@@ -480,9 +458,14 @@ class SklandAPI:
         )
 
         if response.get("status") != 0:
-            raise Exception(f"Authorization failed: {response.get('message', 'Unknown error')}")
+            msg = response.get("message") or response.get("msg") or "Unknown error"
+            raise Exception(f"Authorization failed: {msg}")
 
-        return response["data"]["code"]
+        data = response.get("data")
+        code = data.get("code") if isinstance(data, dict) else None
+        if not isinstance(code, str) or not code:
+            raise Exception("Authorization failed: 响应缺少 code")
+        return code
 
     async def get_credential(self, authorization: str) -> Credential:
         """Get credential from authorization code"""
